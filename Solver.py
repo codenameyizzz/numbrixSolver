@@ -1,101 +1,92 @@
+# Solver.py
+
+import random
+import math
+from Board import Board
+
 def solve(board, debug_level):
-    """Use a depth-first search to solve the Numbrix puzzle.
+    """Use Simulated Annealing to solve the Numbrix puzzle."""
+    max_iterations = 50000
+    temperature = 1.0
+    cooling_rate = 0.00002
+    current_board = Board(other_board=board)
+    current_board.initialize_board()
+    current_conflicts = current_board.calculate_conflicts()
+    iteration = 0
 
-    Approach:
-     * Pop the top of the stack of boards to explore
-     * Pick a square containing a defined value which has open neighbors
-     * Push boards to the stack with the possible "next moves" from the defined value
-     * Mark the current board as "seen"
-     * If the board is complete, validate it and return success
-     * If there are no more possible next moves, report failure
-    """
-    i = 0
-    leaves = 0
-    cross_overs = 0
+    while iteration < max_iterations and not current_board.is_goal() and temperature > 0:
+        iteration += 1
+        neighbors = current_board.get_neighbors()
+        neighbor = min(neighbors, key=lambda b: b.calculate_conflicts())
+        neighbor_conflicts = neighbor.calculate_conflicts()
+        delta = neighbor_conflicts - current_conflicts
 
-    seen = set()
-    stack = [board]
+        if delta < 0 or random.uniform(0, 1) < math.exp(-delta / temperature):
+            current_board = neighbor
+            current_conflicts = neighbor_conflicts
 
-    while len(stack) > 0:
-        curr = stack.pop()
-        i += 1
-        if i % 100 == 0 and debug_level == "info":
-            print(f"Iteration {i}, leaves: {leaves}, cross overs: {cross_overs}, current board:\n{curr}")
-        elif debug_level == "trace" or debug_level == "pause":
-            print(f"Iteration {i}, leaves: {leaves}, cross overs: {cross_overs}, current board:\n{curr}")
-            if debug_level == "pause":
-                input(":")
+        temperature *= 1 - cooling_rate  # Exponential cooling
 
-        if repr(curr) in seen or curr.is_not_feasible():
-            if curr.is_not_feasible():
-                leaves += 1
-            else:
-                cross_overs += 1
-            continue
+        if debug_level == "trace" and iteration % 1000 == 0:
+            print(f"Iteration {iteration}, Temperature: {temperature:.4f}, Conflicts: {current_conflicts}")
 
-        elif curr.is_complete():
-            print(f"Success! Took {i} iterations, found {leaves} dead ends and {cross_overs} graph cross overs.")
-            print("  --> Final board:")
-            print(curr)
-            return
-
-        else:
-            boards = curr.get_next_boards()
-            stack.extend(boards)
-            seen.add(repr(curr))
-
-    print(f"Failure, could not find a solution after {i} iterations. Saw {leaves} dead ends and {cross_overs} "
-          "graph cross overs.")
-
+    if current_board.is_goal():
+        print(f"Success! Found a solution in {iteration} iterations.")
+        print(current_board)
+    else:
+        print(f"Failed to find a solution after {iteration} iterations.")
+        print(f"Final conflicts: {current_conflicts}")
+        print(current_board)
 
 def check_line(line):
     """Check that:
       * a line has nine values
-      * each val has length 1 or 2
-      * each val is either digital or "-"
-      * digital values are between 1 and 81
+      * each val is either digit or "-"
+      * digit values are between 1 and 81
     """
-    vals = line.split()
-    if not len(vals) == 9:
+    vals = line.strip().split()
+    if len(vals) != 9:
         return False
 
     for val in vals:
-        if not 1 <= len(val) <= 2:
-            return False
         if not (val.isdigit() or val == "-"):
             return False
-        if val.isdigit() and not 1 <= int(val) <= 81:
-            return False
+        if val.isdigit():
+            num = int(val)
+            if not 1 <= num <= 81:
+                return False
 
     return True
 
-
 def store_line(line, row, board):
-    """Set a line of this solver's board."""
-    for col, val in enumerate(line.split()):
+    """Set a line of the board."""
+    for col, val in enumerate(line.strip().split()):
         if val.isdigit():
-            board.set(row, col, int(val))
-
+            board.set(row, col, int(val), is_fixed=True)
+        else:
+            pass  # Empty cells remain unset
 
 def read_input_from_file(file, board):
     """Read a board from a file."""
     with open(file) as f:
         lines = f.readlines()
+        if len(lines) != 9:
+            raise ValueError("Input file must contain exactly 9 lines.")
         for row, line in enumerate(lines):
-            store_line(line.strip(), row, board)
-
+            if check_line(line):
+                store_line(line, row, board)
+            else:
+                raise ValueError(f"Invalid line {row + 1} in input file.")
     print(f"All lines read from {file}, input board:\n{board}")
-
 
 def read_input_from_stdin(board):
     """Read a board from stdin."""
-    lines = 0
-    while lines < 9:
-        line = input("Please enter line " + str(lines + 1) + ": ")
+    lines_read = 0
+    while lines_read < 9:
+        line = input(f"Please enter line {lines_read + 1}: ")
         if check_line(line):
-            store_line(line, lines, board)
-            lines += 1
+            store_line(line, lines_read, board)
+            lines_read += 1
         else:
-            print("Error while parsing line, expecting nine values, 1-81 or '-' separated by spaces, please try again")
-
+            print("Error: Each line must contain nine values (1-81 or '-') separated by spaces. Please try again.")
     print(f"All lines entered, input board:\n{board}")

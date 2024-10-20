@@ -1,192 +1,123 @@
+# Board.py
+
 from BoardValue import Val
-
-
-def is_one_away(val1, val2):
-    """Return whether or not the two values are numerically adjacent."""
-    return abs(val1 - val2) == 1
-
-
-def get_directional_neighbors(row, col):
-    """Given a row and column value, return the row and column values of the corresponding up, down, left and right
-    neighboring squares."""
-    return [[a + b for a, b in zip((row, col), directional)]
-            for directional in ((-1, 0), (1, 0), (0, -1), (0, 1))]
-
-
-def get_all_coordinates_at_distance(row, col, distance):
-    """Return all feasible coordinates in a board which have a Manhattan Distance of `distance` from the location given
-    by (row, col)."""
-    coordinates = set()
-
-    if distance <= 0:
-        return coordinates
-
-    pairs = [(x, distance - x) for x in range(distance + 1)]
-    for quadrant_multiplier in ((1, 1), (1, -1), (-1, 1), (-1, -1)):
-        row_multiplier, col_multiplier = quadrant_multiplier
-        for row_pair_part, col_pair_part in pairs:
-            r = row + (row_pair_part * row_multiplier)
-            c = col + (col_pair_part * col_multiplier)
-            if 0 <= r < 9 and 0 <= c < 9:
-                coordinates.add((r, c))
-
-    return coordinates
-
+import random
 
 class Board:
-    """A Numbrix board.
+    """A Numbrix board."""
 
-    A board is represented as a 9x9 grid of values, stored internally as a 1-dimensional array.
-    """
     def __init__(self, other_board=None):
         if other_board is not None:
             self.board = []
             for val in other_board.board:
                 self.board.append(Val(val_to_copy=val))
         else:
-            self.board = [
-                Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(),
-                Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(),
-                Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(),
-                Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(),
-                Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(),
-                Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(),
-                Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(),
-                Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(),
-                Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val(), Val()
-            ]
-
-    def is_complete(self):
-        """Check if the board has valid values for all squares."""
-        return False not in [v.is_set() for v in self.board]
-
-    def is_not_feasible(self):
-        """Check if the current board is no longer feasible.
-
-        This may happen if:
-         * Any squares no longer have any feasible values which they can hold
-         * Any squares have become somewhat surrounded but they do not have their required "correct neighbors"
-        """
-        for row in range(9):
-            for col in range(9):
-                val = self.get(row, col)
-                if val.is_set() and not self.would_be_feasible(row, col, val.get()):
-                    return True
-
-        return len([1 for v in self.board if not v.is_set() and v.possible_values_size() == 0]) > 0
+            self.board = [Val() for _ in range(81)]  # Initialize empty board
 
     def get(self, row, col):
-        """Using row-major ordering, get the value at location (row, col) or return None if the index is bad."""
+        """Get the value at location (row, col)."""
         if not (0 <= row < 9 and 0 <= col < 9):
             return None
         return self.board[row * 9 + col]
 
-    def set(self, row, col, val):
-        """Using row-major ordering, set the value at location (row, col).
-
-        This operation will also ripple throughout the rest of the board, progressively removing possible values from
-        the surrounding squares on the board.
-
-        For example, if the middle of the board is set to value 50, everything else in the board should lose the
-        possibility of having the value 50, every square a Manhattan Distance of 2 or greater away should also lose the
-        values 49 and 51, etc.
-        """
+    def set(self, row, col, val, is_fixed=False):
+        """Set the value at location (row, col)."""
         if not (0 <= row < 9 and 0 <= col < 9):
-            raise ValueError(f"Row and column values must be in the range [0 .. 8] but got row: {row}, column: {col}")
-        self.board[row * 9 + col].set(val)
+            raise ValueError(
+                f"Row and column values must be in the range [0 .. 8] but got row: {row}, column: {col}"
+            )
+        self.board[row * 9 + col].set(val, is_fixed)
 
-        for distance in range(1, 17):  # 16 is the maximum board distance
-            for r, c in get_all_coordinates_at_distance(row, col, distance):
-                for v in range(val, val + distance):
-                    self.get(r, c).remove_possible_value(v)
-                for v in range(val - distance + 1, val):
-                    self.get(r, c).remove_possible_value(v)
+    def initialize_board(self):
+        """Initialize the board for local search."""
+        # Create a list of all numbers from 1 to 81
+        numbers = list(range(1, 82))
+        # Remove the fixed values from the list
+        for val in self.board:
+            if val.is_fixed:
+                numbers.remove(val.get())
+        # Shuffle the remaining numbers
+        random.shuffle(numbers)
+        # Assign the numbers to the non-fixed cells
+        for val in self.board:
+            if not val.is_fixed:
+                val.set(numbers.pop())
 
-    def would_be_feasible(self, row, col, val):
-        """Check if the provided value would be feasible at the specified location.
+    def calculate_conflicts(self):
+        """Calculate the number of conflicts in the board."""
+        conflicts = 0
+        position_of_number = [None] * 82  # Index 0 unused
 
-        For a value to be feasible at a location, it must have (provided it is not 1 or 81):
-         * At least two open neighbors (if none of the directional neighbors are correct)
-         * Or one correct directional neighbor and at least one open neighbor
-         * Or two correct directional neighbors
-
-        If the value is 1 or 81:
-         * It can either have at least one open neighbor
-         * Or one correct directional neighbor
-        """
-        open_neighbors = 0
-        correct_directional_neighbors = 0
-
-        for directional_row, directional_col in get_directional_neighbors(row, col):
-            if not (0 <= directional_row < 9 and 0 <= directional_col < 9):
-                continue
-
-            directional_val = self.get(directional_row, directional_col)
-            if not directional_val.is_set():
-                open_neighbors += 1
-            elif is_one_away(val, directional_val.get()):
-                correct_directional_neighbors += 1
-
-        if val == 1 or val == 81:
-            return open_neighbors >= 1 or correct_directional_neighbors == 1
-        else:
-            return (correct_directional_neighbors == 0 and open_neighbors >= 2) or \
-                   (correct_directional_neighbors == 1 and open_neighbors >= 1) or \
-                   correct_directional_neighbors == 2
-
-    def get_next_boards(self):
-        """Evaluate the board and take the next logical assignments on some specific square. Return all boards that
-        represent feasible moves on the minimal options location.
-        """
-        next_boards = []
-
-        minimal_options_val_tuple = None
-
+        # Map the position of each number
         for row in range(9):
             for col in range(9):
-                val = self.get(row, col)
-                if not val.is_set() and (
-                        minimal_options_val_tuple is None
-                        or val.possible_values_size() < minimal_options_val_tuple[0].possible_values_size()):
-                    minimal_options_val_tuple = (val, row, col)
+                num = self.get(row, col).get()
+                position_of_number[num] = (row, col)
 
-        # Minimal options location has been identified, now return all feasible values as possible next boards
-        val, row, col = minimal_options_val_tuple
-        for value in val.possible_values:
-            if self.would_be_feasible(row, col, value):
-                new_board = Board(other_board=self)
-                new_board.set(row, col, value)
-                next_boards.append(new_board)
+        # Check each number from 1 to 81
+        for num in range(1, 82):
+            row, col = position_of_number[num]
+            val = self.get(row, col)
 
-        return next_boards
+            # Determine expected adjacent numbers
+            if num == 1:
+                expected_neighbors = [2]
+            elif num == 81:
+                expected_neighbors = [80]
+            else:
+                expected_neighbors = [num - 1, num + 1]
+
+            # Check if expected neighbors are adjacent
+            found_neighbors = 0
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                adj_row, adj_col = row + dr, col + dc
+                if 0 <= adj_row < 9 and 0 <= adj_col < 9:
+                    adj_num = self.get(adj_row, adj_col).get()
+                    if adj_num in expected_neighbors:
+                        found_neighbors += 1
+
+            # Update conflicts
+            conflicts += len(expected_neighbors) - found_neighbors
+
+        return conflicts
+
+    def get_neighbors(self):
+        """Generate neighboring boards by swapping two random non-fixed cells."""
+        neighbors = []
+        non_fixed_positions = [
+            (row, col)
+            for row in range(9)
+            for col in range(9)
+            if not self.get(row, col).is_fixed
+        ]
+
+        # Generate a fixed number of random neighbors
+        for _ in range(10):  # Generate 10 random neighbors
+            if len(non_fixed_positions) < 2:
+                break
+            i, j = random.sample(range(len(non_fixed_positions)), 2)
+            new_board = Board(other_board=self)
+            (row1, col1) = non_fixed_positions[i]
+            (row2, col2) = non_fixed_positions[j]
+            val1 = self.get(row1, col1).get()
+            val2 = self.get(row2, col2).get()
+            new_board.set(row1, col1, val2)
+            new_board.set(row2, col2, val1)
+            neighbors.append(new_board)
+        return neighbors
+
+    def is_goal(self):
+        """Check if the board is a valid solution."""
+        return self.calculate_conflicts() == 0
 
     def __repr__(self):
-        """What should the board look like when it is printed? How about:
-
-            +----------------------------+
-            |  1  2  3  4  5  6  7  8  9 |
-            | 18 17 16 15 14 13 12 11 10 |
-            | 19 20 21 22 23 24 25 26 27 |
-            | 36 35 34 33 32 31 30 29 28 |
-            | 37 38 39 40 41 42 43 44 45 |
-            | 54 53 52 51 50 49 48 47 46 |
-            | 55 56 57 58 59 60 61 62 63 |
-            | 72 71 70 69 68 67 66 65 64 |
-            | 73 74 75 76 77 78 79 80 81 |
-            +----------------------------+
-
-        :return: The string representation of the board.
-        """
-        output = "    +----------------------------+\n"
+        """String representation of the board."""
+        output = "+----------------------------+\n"
         for row in range(9):
+            output += "|"
             for col in range(9):
-                if col == 0:
-                    output += "    |"
-
-                output += str(self.get(row, col)).rjust(3)
-
-                if col == 8:
-                    output += " |\n"
-
-        output += "    +----------------------------+"
+                val = self.get(row, col)
+                output += str(val).rjust(3)
+            output += " |\n"
+        output += "+----------------------------+"
         return output
